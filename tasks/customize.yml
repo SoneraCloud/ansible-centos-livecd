@@ -1,0 +1,150 @@
+---
+- name: Install guestfish tools
+  become: true
+  package:
+    name: libguestfs-tools
+    state: "{{ livecd_tools_state }}"
+
+- name: Install squashfs tools
+  become: true
+  package:
+    name: squashfs-tools
+    state: "{{ livecd_tools_state }}"
+
+- name: Install livecd tools (for PXE)
+  become: true
+  package:
+    name: livecd-tools
+    state: "{{ livecd_tools_state }}"
+
+- name: Create a new loopback device automatically if all are in use
+  become: true
+  command: "losetup -f"
+
+- name: Create working directory
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: 0755
+  with_items:
+    - "{{ livecd_workdir }}/iso"
+    - "{{ livecd_workdir }}/liveos"
+    - "{{ livecd_cache_dir }}"
+
+- name: Download the ISO file if it does not exist
+  get_url:
+    url: "{{ livecd_url }}/{{ livecd_input_iso }}"
+    dest: "{{ livecd_cache_dir }}/{{ livecd_input_iso }}"
+    checksum: "{{ livecd_input_iso_checksum }}"
+
+- name: Unpack the ISO file using guestfish
+  # The following env is needed for livecd (guestfish) to work
+  # without a libvirt backend like kvm (will complain about missing socket)
+  environment:
+    LIBGUESTFS_BACKEND: direct 
+  shell: "guestfish -a {{ livecd_cache_dir }}/{{ livecd_input_iso }} -m /dev/sda tar-out / - | tar xvf -"
+  args:
+    chdir: "{{ livecd_workdir }}/iso"
+
+- name: Unsquash the squashfs image
+  command: "unsquashfs -dest {{ livecd_workdir }}/squashfs {{ livecd_workdir }}/iso/LiveOS/squashfs.img"
+
+- name: Remove the squashfs image so we can replace it later
+  become: true
+  file:
+    path: "{{ livecd_workdir }}/iso/LiveOS/squashfs.img"
+    state: absent
+
+- name: Mount the LiveOS ext3fs image so it can be modified
+  become: true
+  mount:
+    name: "{{ livecd_workdir }}/liveos"
+    src: "{{ livecd_workdir }}/squashfs/LiveOS/ext3fs.img"
+    fstype: auto
+    opts: loop,rw
+    state: mounted
+
+- name: Create sshd symlink if it does not exist
+  become: true
+  file:
+    src: /usr/lib/systemd/system/sshd.service
+    dest: "{{ livecd_workdir }}/liveos/etc/systemd/system/multi-user.target.wants/sshd.service"
+    state: link
+    force: yes
+
+- name: Create .ssh directory for root
+  become: true
+  file:
+    path: "{{ livecd_workdir }}/liveos/root/.ssh"
+    state: directory
+    mode: 0700
+
+- name: Create authorized_keys to root and add deploy-key
+  become: true
+  shell: echo "{{ livecd_pubkey }}" > "{{ livecd_workdir }}/liveos/root/.ssh/authorized_keys"
+
+- name: Set permissions for authorized_keys
+  become: true
+  file:
+    path: "{{ livecd_workdir }}/liveos/root/.ssh/authorized_keys"
+    state: file
+    mode: 0600
+
+- name: Unmount LiveOS ext3fs
+  become: true
+  mount:
+    name: "{{ livecd_workdir }}/liveos"
+    state: unmounted
+
+- name: Change permissions to enable writing
+  become: true
+  file:
+    path: "{{ livecd_workdir }}/iso/LiveOS"
+    state: directory
+    mode: 0755
+
+- name: Recreate the squashfs image (light compression)
+  command: "mksquashfs '{{ livecd_workdir }}/squashfs' '{{ livecd_workdir }}/iso/LiveOS/squashfs.img' -b 1024k -comp gzip -Xcompression-level 1 -e boot"
+  when: livecd_use_fast_compression
+
+- name: Recreate the squashfs image (heavy compression)
+  command: "mksquashfs '{{ livecd_workdir }}/squashfs' '{{ livecd_workdir }}/iso/LiveOS/squashfs.img' -b 1024k -comp xz -Xbcj x86 -e boot"
+  when: not livecd_use_fast_compression
+
+- name: Change permissions to read only
+  become: true
+  file:
+    path: "{{ livecd_workdir }}/iso/LiveOS"
+    state: directory
+    mode: 0555
+
+# isoinfo comes with libguestfs package
+- name: Find the volume id of the ISO file
+  shell: "isoinfo -d -i '{{ livecd_cache_dir }}/{{ livecd_input_iso }}' | grep 'Volume id' | sed 's/Volume id: //'"
+  register: volid
+
+- name: Create the bootable ISO
+  become: true
+  command: "mkisofs -R -J -T -v -V '{{ volid.stdout }}' -no-emul-boot -boot-load-size 4 -boot-info-table -b isolinux/isolinux.bin -c isolinux/boot.cat -o '{{ livecd_cache_dir }}/{{ livecd_output_iso }}' ."
+  args:
+    chdir: "{{ livecd_workdir }}/iso"
+
+- name: Clean up working directory
+  become: true
+  file:
+    path: "{{ livecd_workdir }}"
+    state: absent
+
+- name: Clean up tftpboot directory if it exists
+  become: true
+  file:
+    path: "{{ livecd_workdir }}/tftpboot"
+    state: absent
+  when: livecd_output_pxe
+    
+- name: Extract PXE files to tftpboot directory
+  become: true
+  command: "livecd-iso-to-pxeboot {{ livecd_output_iso }}"
+  args:
+    chdir: "{{ livecd_cache_dir }}"
+  when: livecd_output_pxe
