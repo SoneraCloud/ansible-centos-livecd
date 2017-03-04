@@ -1,0 +1,13 @@
+# Toggle to switch between fastest gzip or tightest LZMA2
+livecd_use_fast_compression: false
+livecd_input_iso: CentOS-7-x86_64-LiveGNOME-1611.iso
+livecd_output_iso: CentOS-7-live.iso
+livecd_input_iso_checksum: sha256:8af6ad70c35c9b65e7ca88b38d18bed14598eb122169c1a22fc3f5b1c2de7d87
+livecd_url: http://ftp.funet.fi/pub/linux/mirrors/centos/7.3.1611/isos/x86_64/
+# The cache directory specifies where the input iso is cached (downloaded if
+# needed) and where the output iso is written to
+livecd_cache_dir: /tmp/livecd
+# Temporary working directory (will be removed when done)
+livecd_workdir: /tmp/livecd_tmp
+livecd_tools_state: latest
+livecd_output_pxe: true
