@@ -17,10 +17,6 @@
     name: livecd-tools
     state: "{{ livecd_tools_state }}"
 
-- name: Create a new loopback device automatically if all are in use
-  become: true
-  command: "losetup -f"
-
 - name: Create working directory
   file:
     path: "{{ item }}"
