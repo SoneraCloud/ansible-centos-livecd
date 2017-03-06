@@ -134,7 +134,7 @@
 - name: Clean up tftpboot directory if it exists
   become: true
   file:
-    path: "{{ livecd_workdir }}/tftpboot"
+    path: "{{ livecd_cache_dir }}/tftpboot"
     state: absent
   when: livecd_output_pxe
     
